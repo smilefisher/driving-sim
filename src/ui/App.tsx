@@ -13,12 +13,14 @@ export default function App() {
   const params = new URLSearchParams(window.location.search);
   const deepLesson = params.get('lesson');
   const deepGb: Gearbox = params.get('gb') === 'auto' ? 'auto' : 'manual';
+  const deepCam = params.get('cam');
 
   const [screen, setScreen] = useState<'menu' | 'drive'>(deepLesson ? 'drive' : 'menu');
   const [gearbox, setGearbox] = useState<Gearbox>(deepGb);
   const [lessonId, setLessonId] = useState(deepLesson ?? 'prep');
   const [hud, setHud] = useState<HudState | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [glError, setGlError] = useState<string | null>(null);
   const mountRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Game | null>(null);
 
@@ -27,13 +29,35 @@ export default function App() {
     const el = mountRef.current;
     if (!el) return;
 
-    const g = new Game(el);
+    // 先检查 WebGL，老设备/关闭硬件加速时给友好提示，而不是白屏
+    const probe = document.createElement('canvas');
+    const gl =
+      probe.getContext('webgl2') ||
+      probe.getContext('webgl') ||
+      probe.getContext('experimental-webgl');
+    if (!gl) {
+      setGlError('当前浏览器没有可用的 WebGL。请更新浏览器，或在设置里打开「硬件加速」后重试。');
+      return;
+    }
+
+    let g: Game;
+    try {
+      g = new Game(el);
+    } catch (err) {
+      setGlError(`3D 初始化失败：${(err as Error)?.message ?? err}`);
+      return;
+    }
+
     gameRef.current = g;
     g.onHud = (h) => setHud(h);
     g.onKey((k) => {
       if (k === 'h') setHelpOpen((v) => !v);
     });
     g.start(gearbox, lessonId);
+    if (deepCam === 'top' || deepCam === 'cockpit') {
+      const want = deepCam;
+      if (g.hud.camera !== want) g.cycleCamera();
+    }
     g.run();
 
     return () => {
@@ -115,6 +139,23 @@ export default function App() {
       )}
 
       {helpOpen && <HelpPanel onClose={() => setHelpOpen(false)} />}
+
+      {glError && (
+        <div className="overlay">
+          <div className="modal">
+            <h2>这台设备暂时跑不动 3D</h2>
+            <p>{glError}</p>
+            <p style={{ fontSize: 12.5 }}>
+              也可以换用 Chrome / Edge / Safari 的最新版本再试一次。
+            </p>
+            <div className="actions">
+              <button className="btn primary" onClick={backToMenu}>
+                返回目录
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
