@@ -317,11 +317,12 @@ button {
 }
 
 .gear {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 700;
   line-height: 1;
-  width: 34px;
+  width: 44px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .gear.small {

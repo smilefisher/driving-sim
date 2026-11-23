@@ -34,7 +34,8 @@ class Shifter {
   }
   run(car: Car, out: Out) {
     if (car.gearbox === 'auto') {
-      if (car.gear !== this.target) car.shiftTo(this.target);
+      out.brk = Math.max(out.brk, 0.5); // 自动挡挂挡要踩住刹车
+      if (car.gear !== this.target) car.shiftTo(this.target, 0.5);
       else this.phase = 'done';
       return;
     }
@@ -154,15 +155,17 @@ function act(car: Car, stepId: string, session: Session, shifter: Shifter, out: 
       out.brk = 0.7;
       out.steer = steerToLane(car);
       break;
-    case 'stop':
+    case 'stop': {
       out.brk = 1;
+      const parkGear = car.gearbox === 'auto' ? 2 : 0;
       if (car.gearbox === 'manual' && car.clutch < 0.7) out.down = true;
       if (car.speedKmh < 0.2) {
-        shifter.begin(0);
+        shifter.begin(parkGear);
         shifter.run(car, out);
-        if (car.gear === 0 && !car.handbrake) car.toggleHandbrake();
+        if (car.gear === parkGear && !car.handbrake) car.toggleHandbrake();
       }
       break;
+    }
     case 'approach':
       out.thr = car.speedKmh < 5 ? 0.22 : 0;
       out.brk = car.speedKmh > 9 ? 0.3 : 0;
@@ -171,6 +174,23 @@ function act(car: Car, stepId: string, session: Session, shifter: Shifter, out: 
     case 'neutral':
       if (car.gear !== 0) shifter.begin(0);
       shifter.run(car, out);
+      break;
+    case 'park-gear':
+      if (car.gear !== 2) shifter.begin(2);
+      shifter.run(car, out);
+      break;
+    case 'park-check':
+      // 起步第一课：确认在 P 挡（游戏开局就是 P）
+      if (car.gear !== 2) car.shiftTo(2);
+      break;
+    case 'creep':
+      // 松开刹车、不给油，让怠速蠕行把车带起来
+      out.brk = 0;
+      out.thr = 0;
+      break;
+    case 'coast':
+      out.brk = 0;
+      out.thr = 0;
       break;
     case 'engine':
       if (car.engineOn) car.ignition();
@@ -198,10 +218,19 @@ function act(car: Car, stepId: string, session: Session, shifter: Shifter, out: 
           if (car.clutch > 0.02) out.up = true;
         }
       } else {
-        if (!car.engineOn) car.ignition();
-        else if (car.gear !== 1) car.shiftTo(1);
-        else if (car.handbrake) car.toggleHandbrake();
-        else out.thr = 0.6;
+        // 自动挡：踩刹车 → 点火 → 挂 D → 松手刹 → 给油
+        if (!car.engineOn) {
+          out.brk = 0.6;
+          car.ignition();
+        } else if (car.gear !== 1) {
+          out.brk = 0.6;
+          car.shiftTo(1, 0.6);
+        } else if (car.handbrake) {
+          out.brk = 0.4;
+          car.toggleHandbrake();
+        } else if (car.speedKmh < 12) {
+          out.thr = 0.6;
+        }
       }
       break;
     }
@@ -209,16 +238,18 @@ function act(car: Car, stepId: string, session: Session, shifter: Shifter, out: 
       out.brk = car.speedKmh > 4 ? 0.5 : 0.12;
       out.steer = steerToCurb(car);
       break;
-    case 'secure':
+    case 'secure': {
       out.brk = 1;
+      const lockGear = car.gearbox === 'auto' ? 2 : 0;
       if (car.gearbox === 'manual' && car.clutch < 0.7) out.down = true;
       if (car.speedKmh < 0.3) {
-        shifter.begin(0);
+        shifter.begin(lockGear);
         shifter.run(car, out);
-        if (car.gear === 0 && !car.handbrake) car.toggleHandbrake();
-        if (car.gear === 0 && car.handbrake && car.engineOn) car.ignition();
+        if (car.gear === lockGear && !car.handbrake) car.toggleHandbrake();
+        if (car.gear === lockGear && car.handbrake && car.engineOn) car.ignition();
       }
       break;
+    }
     default:
       break;
   }
@@ -236,6 +267,8 @@ function runLesson(gearbox: Gearbox, lessonId: string): boolean {
   session.begin(lessonId);
   const car = new Car(gearbox);
   car.reset(world.start.x, world.start.z, world.start.heading);
+  // 自动挡开局挂在 P 挡（与游戏里 Game.start 一致）
+  if (gearbox === 'auto' && lesson.startMode === 'parked') car.gear = 2;
 
   if (lesson.startMode === 'rolling') {
     car.engineOn = true;
@@ -244,9 +277,10 @@ function runLesson(gearbox: Gearbox, lessonId: string): boolean {
     car.mirrorAdjusted = true;
     car.seatPos = 0.5;
     car.awayChecked = true;
-    car.gear = lesson.startGear ?? 1;
+    car.gear = gearbox === 'auto' ? 1 : (lesson.startGear ?? 1);
     car.speed = (lesson.startSpeedKmh ?? 15) / 3.6;
     car.rpm = 1200;
+    car.syncAutoGear();
   }
 
   const shifter = new Shifter();
@@ -370,6 +404,126 @@ badCase('忘松手刹就走', '车不该动', (car) => car.speedKmh < 0.5);
   car.shiftTo(1);
   const ok = car.gear === before;
   console.log(`${ok ? '✓' : '✗'} 离合没踩到底就挂挡 → 挂不进去`);
+  if (!ok) failures += 1;
+}
+
+// ---------------------------------------------------------------- 自动挡专项
+console.log('\n========== 自动挡专项 ==========');
+
+// 1) P 挡必须锁车
+{
+  const car = new Car('auto');
+  car.reset(-1.75, -45, 0);
+  car.gear = 2; // P
+  car.engineOn = true;
+  car.handbrake = false;
+  let maxSpeed = 0;
+  for (let t = 0; t < 5; t += DT) {
+    car.update(DT, { ...EMPTY_INPUT, throttle: 1 });
+    maxSpeed = Math.max(maxSpeed, car.speedKmh);
+  }
+  const ok = maxSpeed < 0.3;
+  console.log(`${ok ? '✓' : '✗'} P 挡踩满油门 → 车不动（${maxSpeed.toFixed(2)} km/h）`);
+  if (!ok) failures += 1;
+}
+
+// 2) 不踩刹车不能从 P 挂出来
+{
+  const car = new Car('auto');
+  car.reset(-1.75, -45, 0);
+  car.gear = 2;
+  car.shiftTo(1, 0);
+  const ok = car.gear === 2;
+  console.log(`${ok ? '✓' : '✗'} 不踩刹车挂 D 挡 → 挂不进去（防误操作）`);
+  if (!ok) failures += 1;
+}
+
+// 3) 踩住刹车可以挂 D
+{
+  const car = new Car('auto');
+  car.reset(-1.75, -45, 0);
+  car.gear = 2;
+  car.shiftTo(1, 0.5);
+  const ok = car.gear === 1;
+  console.log(`${ok ? '✓' : '✗'} 踩住刹车挂 D 挡 → 挂得进`);
+  if (!ok) failures += 1;
+}
+
+// 4) D 挡松刹车应当怠速蠕行（不用给油）
+{
+  const car = new Car('auto');
+  car.reset(-1.75, -45, 0);
+  car.gear = 1;
+  car.engineOn = true;
+  car.handbrake = false;
+  let creepSpeed = 0;
+  for (let t = 0; t < 6; t += DT) {
+    car.update(DT, { ...EMPTY_INPUT });
+    creepSpeed = car.speedKmh;
+  }
+  const ok = creepSpeed > 3 && creepSpeed < 14;
+  console.log(`${ok ? '✓' : '✗'} D 挡松刹车不给油 → 怠速蠕行 ${creepSpeed.toFixed(1)} km/h`);
+  if (!ok) failures += 1;
+}
+
+// 5) 自动升挡：加速时应该依次用到 D1→D2→D3 以上，且全程不熄火
+{
+  const car = new Car('auto');
+  car.reset(-1.75, -45, 0);
+  car.gear = 1;
+  car.engineOn = true;
+  car.handbrake = false;
+  const gearsSeen = new Set<number>();
+  let stalled = false;
+  car.onEvent((e) => {
+    if (e.type === 'stall') stalled = true;
+  });
+  for (let t = 0; t < 16; t += DT) {
+    car.update(DT, { ...EMPTY_INPUT, throttle: 0.8 });
+    gearsSeen.add(car.autoGear);
+  }
+  const ok = !stalled && gearsSeen.size >= 3 && car.speedKmh > 40;
+  console.log(
+    `${ok ? '✓' : '✗'} 自动升挡 → 用到 ${[...gearsSeen].sort().join('/')} 挡，${car.speedKmh.toFixed(
+      0
+    )} km/h，未熄火`
+  );
+  if (!ok) failures += 1;
+}
+
+// 6) 自动挡不存在熄火
+{
+  const car = new Car('auto');
+  car.reset(-1.75, -45, 0);
+  car.gear = 1;
+  car.engineOn = true;
+  car.handbrake = true; // 拉着手刹踩油门，手动挡会憋熄火
+  let stalled = false;
+  car.onEvent((e) => {
+    if (e.type === 'stall') stalled = true;
+  });
+  for (let t = 0; t < 6; t += DT) car.update(DT, { ...EMPTY_INPUT, throttle: 1 });
+  const ok = !stalled;
+  console.log(`${ok ? '✓' : '✗'} 自动挡拉手刹踩油门 → 不会熄火（液力变矩器打滑）`);
+  if (!ok) failures += 1;
+}
+
+// 7) 挡位显示：P / D1..D6 / R / N（HUD 直接读这个字段）
+{
+  const car = new Car('auto');
+  car.reset(-1.75, -45, 0);
+  const labels: string[] = [];
+  car.gear = 2;
+  labels.push(car.gearLabel);
+  car.gear = 0;
+  labels.push(car.gearLabel);
+  car.gear = -1;
+  labels.push(car.gearLabel);
+  car.gear = 1;
+  car.autoGear = 3;
+  labels.push(car.gearLabel);
+  const ok = labels.join(',') === 'P,N,R,D3';
+  console.log(`${ok ? '✓' : '✗'} 挡位显示 → ${labels.join(' / ')}`);
   if (!ok) failures += 1;
 }
 

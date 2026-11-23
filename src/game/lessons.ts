@@ -247,20 +247,30 @@ const lesson2Manual: Lesson = {
 const lesson2Auto: Lesson = {
   id: 'launch',
   title: '第 2 课 · 起步（自动挡）',
-  brief: '自动挡五步：踩刹车 → 点火 → 挂 D 挡 → 松手刹 → 松刹车给油。没有离合，但顺序不能错。',
+  brief:
+    '自动挡七步：确认 P 挡 → 踩刹车 → 点火 → 打左灯 → 挂 D 挡 → 松手刹 → 松刹车让车自己走。自动挡松刹车就会蠕行，不用踩油门。',
   startMode: 'parked',
   build: () => [
     {
+      id: 'park-check',
+      title: '确认挡位在 P 挡',
+      detail:
+        '自动挡停车时挂在 P 挡。上车第一件事就是确认挡位 —— P 挡是驻车挡，会锁住变速箱。',
+      hint: (c) => (c.car.gear === 2 ? '' : '按 P 挂入驻车挡'),
+      check: (c) => c.car.gear === 2,
+    },
+    {
       id: 'brake',
       title: '踩住刹车',
-      detail: '按住 S 踩住刹车。自动挡换挡前必须踩住刹车。',
+      detail:
+        '按住 S 踩住刹车。自动挡从 P 挡挂出来必须先踩住刹车，这是防误操作的设计。',
       hint: (c) => (c.input.brake < 0.3 ? '按住 S 踩刹车' : ''),
       check: (c) => c.input.brake > 0.3,
     },
     {
       id: 'ignite',
       title: '点火启动发动机',
-      detail: '按 I 点火。自动挡点火前要确认挡位在 N 或 P。',
+      detail: '按 I 点火。自动挡点火前要确认挡位在 P 或者 N。',
       hint: () => '按 I 点火',
       check: (c) => c.car.engineOn,
     },
@@ -273,9 +283,10 @@ const lesson2Auto: Lesson = {
     },
     {
       id: 'gearD',
-      title: '挂 D 挡',
-      detail: '按 1 挂 D 挡（前进挡）。',
-      hint: () => '按 1 挂 D 挡',
+      title: '踩住刹车挂 D 挡',
+      detail: '保持踩住刹车，按 1 挂 D 挡。没踩刹车就挂挡，车会突然窜出去。',
+      hint: (c) =>
+        c.input.brake < 0.3 ? '先踩住刹车' : c.car.gear !== 1 ? '按 1 挂 D 挡' : '',
       check: (c) => c.car.gear === 1,
     },
     {
@@ -286,11 +297,24 @@ const lesson2Auto: Lesson = {
       check: (c) => !c.car.handbrake,
     },
     {
+      id: 'creep',
+      title: '松开刹车，让车自己蠕行',
+      detail:
+        '放开 S，不要踩油门。自动挡松开刹车后，车会自己慢慢往前爬 —— 这叫怠速蠕行，是自动挡和手动挡最大的区别。',
+      hint: (c) =>
+        c.input.brake > 0.1
+          ? '松开刹车，也别踩油门'
+          : c.car.speedKmh < 1
+            ? '等它自己爬，不用给油'
+            : '',
+      check: (c) => c.car.speedKmh > 1 && c.input.throttle < 0.1,
+    },
+    {
       id: 'go',
-      title: '松刹车，轻给油',
-      detail: '松开刹车（放掉 S），按住 W 轻给油，车会平顺起步。',
-      hint: (c) => (c.input.brake > 0.1 ? '松开刹车' : c.car.speedKmh < 1 ? '按住 W 给油' : ''),
-      check: (c) => c.car.speedKmh > 3,
+      title: '轻给油加速',
+      detail: '按住 W 轻轻给油，加速到 10 km/h。',
+      hint: (c) => `车速 ${c.car.speedKmh.toFixed(1)} km/h`,
+      check: (c) => c.car.speedKmh >= 10,
     },
     {
       id: 'lights-off',
@@ -414,11 +438,29 @@ const lesson3Auto: Lesson = {
         c.session.hold('cruise', c.session.dt, c.car.speedKmh > 28 && laneOffset(c.car) < 0.7) >= 4,
     },
     {
+      id: 'coast',
+      title: '松开油门滑行减速',
+      detail:
+        '松开 W，也不要踩刹车。自动挡收油后变速箱会带挡滑行，车速会自己降下来 —— 体会一下这个"发动机制动"。',
+      hint: (c) =>
+        c.input.throttle > 0.05
+          ? '松开油门'
+          : `车速 ${c.car.speedKmh.toFixed(0)} km/h，等它降到 20 以下`,
+      check: (c) => c.car.speedKmh < 20 && c.input.throttle < 0.05,
+    },
+    {
       id: 'stop',
-      title: '刹车停稳，挂 N 挡拉手刹',
-      detail: '按住 S 停稳 → 按 0 挂 N → 按空格拉手刹。',
-      hint: (c) => (c.car.speedKmh > 0.5 ? '刹车停稳' : c.car.gear !== 0 ? '按 0 挂空挡' : '拉手刹'),
-      check: (c) => c.car.speedKmh < 0.5 && c.car.gear === 0 && c.car.handbrake,
+      title: '刹车停稳，挂 P 挡拉手刹',
+      detail: '按住 S 停稳 → 按 P 挂驻车挡 → 按空格拉手刹。',
+      hint: (c) =>
+        c.car.speedKmh > 0.5
+          ? '刹车停稳'
+          : c.car.gear !== 2
+            ? '按 P 挂驻车挡'
+            : c.car.handbrake
+              ? ''
+              : '按空格拉手刹',
+      check: (c) => c.car.speedKmh < 0.5 && c.car.gear === 2 && c.car.handbrake,
     },
   ],
 };
@@ -432,7 +474,7 @@ const lesson4: Lesson = {
   startMode: 'rolling',
   startGear: 2,
   startSpeedKmh: 25,
-  build: (): Step[] => [
+  build: (gearbox): Step[] => [
     {
       id: 'signal-right',
       title: '打右转向灯',
@@ -467,11 +509,21 @@ const lesson4: Lesson = {
       check: (c) => c.car.speedKmh < 0.5,
     },
     {
-      id: 'neutral',
-      title: '挂空挡',
-      detail: '按 0 挂空挡（自动挡挂 N）。',
-      hint: (c) => (c.car.gearbox === 'manual' && c.car.clutch < 0.6 ? '先踩住离合' : '按 0 挂空挡'),
-      check: (c) => c.car.gear === 0,
+      id: gearbox === 'auto' ? 'park-gear' : 'neutral',
+      title: gearbox === 'auto' ? '挂 P 挡' : '挂空挡',
+      detail:
+        gearbox === 'auto'
+          ? '按 P 挂驻车挡。自动挡停车要挂 P，它靠变速箱里的驻车棘爪锁住车轮。'
+          : '按 0 挂空挡。',
+      hint: (c) =>
+        gearbox === 'auto'
+          ? c.car.gear !== 2
+            ? '按 P 挂驻车挡'
+            : ''
+          : c.car.clutch < 0.6
+            ? '先踩住离合'
+            : '按 0 挂空挡',
+      check: (c) => (gearbox === 'auto' ? c.car.gear === 2 : c.car.gear === 0),
     },
     {
       id: 'handbrake-on',
@@ -518,7 +570,7 @@ const examLesson: Lesson = {
         id: 'start',
         title: '完成起步',
         detail: '把起步的全套动作做完，让车走起来。',
-        check: (c) => c.car.speedKmh > 10 && c.car.gear === (manual ? 1 : 1) && !c.car.handbrake,
+        check: (c) => c.car.speedKmh > 10 && c.car.gear === 1 && !c.car.handbrake,
       },
       {
         id: 'cruise',
@@ -542,9 +594,10 @@ const examLesson: Lesson = {
       },
       {
         id: 'secure',
-        title: '空挡 + 手刹 + 熄火',
+        title: manual ? '空挡 + 手刹 + 熄火' : 'P 挡 + 手刹 + 熄火',
         detail: '停车后的收尾动作。',
-        check: (c) => c.car.gear === 0 && c.car.handbrake && !c.car.engineOn,
+        check: (c) =>
+          (manual ? c.car.gear === 0 : c.car.gear === 2) && c.car.handbrake && !c.car.engineOn,
       },
     ] as Step[];
   },

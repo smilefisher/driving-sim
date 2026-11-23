@@ -73,8 +73,10 @@ export default function Touch({ game, hud }: { game: Game; hud: HudState | null 
             </>
           ) : (
             <>
-              <TapBtn label="D挡" onClick={() => game.press('1')} />
+              <TapBtn label="P挡" onClick={() => game.press('p')} />
+              <TapBtn label="R挡" onClick={() => game.press('r')} />
               <TapBtn label="N挡" onClick={() => game.press('0')} />
+              <TapBtn label="D挡" onClick={() => game.press('1')} />
             </>
           )}
         </div>

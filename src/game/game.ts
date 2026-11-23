@@ -242,15 +242,18 @@ export class Game {
       case '5': {
         const n = Number(k);
         if (this.gearbox === 'auto') {
-          if (n === 1) this.car.shiftTo(1);
-        } else this.car.shiftTo(n);
+          if (n === 1) this.car.shiftTo(1, this.brake);
+        } else this.car.shiftTo(n, this.brake);
         break;
       }
       case '0':
-        this.car.shiftTo(0);
+        this.car.shiftTo(0, this.brake);
         break;
       case 'r':
-        this.car.shiftTo(-1);
+        this.car.shiftTo(-1, this.brake);
+        break;
+      case 'p':
+        if (this.gearbox === 'auto') this.car.shiftTo(2, this.brake);
         break;
       case 'q':
         this.car.toggleSignal('left');
@@ -366,6 +369,8 @@ export class Game {
     this.car = new Car(gearbox);
     this.car.onEvent((e) => this.onSimEvent(e));
     this.car.reset(this.world.start.x, this.world.start.z, this.world.start.heading);
+    // 自动挡上车时挡位在 P（手动挡在空挡）
+    if (gearbox === 'auto') this.car.gear = 2;
     const lesson = getLesson(lessonId, gearbox);
     this.steps = lesson ? lesson.build(gearbox) : [];
     this.session.begin(lessonId);
@@ -383,13 +388,13 @@ export class Game {
       this.car.mirrorAdjusted = true;
       this.car.seatPos = 0.5;
       this.car.awayChecked = true;
-      this.car.gear = lesson.startGear ?? 1;
+      this.car.gear = gearbox === 'auto' ? 1 : (lesson.startGear ?? 1);
       this.car.speed = (lesson.startSpeedKmh ?? 15) / 3.6;
       this.car.rpm = 1200;
+      this.car.syncAutoGear();
       this.inCar = true;
       this.cameraMode = 'cockpit';
-    } else {
-      this.inCar = lessonId !== 'prep';
+    } else {      this.inCar = lessonId !== 'prep';
       this.cameraMode = this.inCar ? 'cockpit' : 'orbit';
       this.session.flags.inCar = this.inCar;
     }

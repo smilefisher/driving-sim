@@ -195,6 +195,9 @@ function HelpPanel({ onClose }: { onClose: () => void }) {
             <kbd>0</kbd> 空挡
           </div>
           <div className="key-row">
+            <kbd>P</kbd> 驻车挡（自动挡）
+          </div>
+          <div className="key-row">
             <kbd>R</kbd> 倒挡
           </div>
           <div className="key-row">

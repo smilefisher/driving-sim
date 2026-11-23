@@ -20,6 +20,13 @@ const MANUAL_RATIOS: Record<number, number> = {
   '-1': 3.3,
 };
 
+/** 自动挡 6 个前进挡的传动比 */
+const AUTO_RATIOS = [3.9, 2.6, 1.85, 1.35, 1.05, 0.85];
+/** 各挡升挡车速（km/h） */
+const AUTO_UPSHIFT = [0, 8, 20, 35, 50, 70];
+/** 各挡降挡车速（km/h），比升挡点低，形成滞回避免频繁跳挡 */
+const AUTO_DOWNSHIFT = [0, 6, 17, 31, 45, 65];
+
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const smoothstep = (e0: number, e1: number, x: number) => {
   const t = clamp((x - e0) / (e1 - e0), 0, 1);
@@ -105,13 +112,44 @@ export class Car {
     this.awayChecked = false;
     this.lowRpmTime = 0;
     this.lastRpmDropAt = 0;
+    this.autoGear = 1;
+    this.autoRatioSmooth = AUTO_RATIOS[0];
   }
+
+  /** 直接把自动挡拉到与当前车速匹配的挡位（用于"车已经在路上"的教学场景） */
+  syncAutoGear() {
+    if (this.gearbox !== 'auto') return;
+    this.updateAutoGear(10);
+  }
+
+  /** 自动变速箱：按车速选挡 + 传动比平滑过渡 */
+  private updateAutoGear(dt: number) {
+    if (this.gear !== 1) {
+      this.autoGear = 1;
+      this.autoRatioSmooth = AUTO_RATIOS[0];
+      return;
+    }
+    const kmh = this.speedKmh;
+    let g = this.autoGear;
+    while (g < AUTO_RATIOS.length && kmh > AUTO_UPSHIFT[g]) g += 1;
+    while (g > 1 && kmh < AUTO_DOWNSHIFT[g - 1]) g -= 1;
+    this.autoGear = g;
+
+    const target = AUTO_RATIOS[g - 1];
+    const d = target - this.autoRatioSmooth;
+    const maxStep = 5.5 * dt;
+    this.autoRatioSmooth += Math.sign(d) * Math.min(Math.abs(d), maxStep);
+  }
+
+  /** 自动挡当前实际在用的挡位（1..6，仅 D 挡有意义） */
+  autoGear = 1;
+  /** 平顺过渡的传动比，换挡时不会突跳 */
+  private autoRatioSmooth = 3.9;
 
   get ratio(): number {
     if (this.gearbox === 'auto') {
-      if (this.gear !== 1) return this.gear === -1 ? 3.3 : 0;
-      const v = Math.abs(this.speed);
-      return v < 4 ? 3.6 : v < 9 ? 2.3 : v < 14 ? 1.5 : v < 20 ? 1.15 : 0.9;
+      if (this.gear === 1) return this.autoRatioSmooth;
+      return this.gear === -1 ? 3.3 : 0;
     }
     return MANUAL_RATIOS[this.gear] ?? 0;
   }
@@ -139,13 +177,15 @@ export class Car {
   }
 
   get inGear(): boolean {
+    if (this.gearbox === 'auto') return this.gear === 1 || this.gear === -1;
     return this.gear !== 0;
   }
 
   get gearLabel(): string {
     if (this.gearbox === 'auto') {
-      if (this.gear === 1) return 'D';
+      if (this.gear === 1) return `D${this.autoGear}`;
       if (this.gear === -1) return 'R';
+      if (this.gear === 2) return 'P';
       return 'N';
     }
     if (this.gear === 0) return 'N';
@@ -169,7 +209,7 @@ export class Car {
       this.emit('grind', '点火前先把离合踩到底，否则起动机带不动挡位');
       return false;
     }
-    if (this.gearbox === 'auto' && this.gear !== 0 && this.speed > 0.5) {
+    if (this.gearbox === 'auto' && (this.gear === 1 || this.gear === -1) && this.speed > 0.5) {
       this.emit('warn', '车辆未停稳，不能点火');
       return false;
     }
@@ -181,7 +221,12 @@ export class Car {
     return true;
   }
 
-  shiftTo(target: number): boolean {
+  /**
+   * 换挡。
+   * 手动挡：1..5 / 0(空挡) / -1(倒挡)，必须踩离合。
+   * 自动挡：2(P) / 0(N) / 1(D) / -1(R)，挂离 P/N 必须踩住刹车，且车要停稳。
+   */
+  shiftTo(target: number, brakePedal = 0): boolean {
     if (this.gearbox === 'manual') {
       if (target === this.gear) return false;
       if (target === -1 && this.speed > 0.8) {
@@ -197,13 +242,33 @@ export class Car {
       this.emit('shift', target === 0 ? '已挂空挡' : `已挂 ${target === -1 ? '倒' : target} 挡`);
       return true;
     }
+
+    // ---------------- 自动挡 ----------------
     if (target === this.gear) return false;
-    if (Math.abs(this.speed) > 0.5) {
-      this.emit('warn', '车辆未停稳，先踩刹车');
+
+    const leavingPark = this.gear === 2 || this.gear === 0;
+    if (leavingPark && (target === 1 || target === -1) && brakePedal < 0.3) {
+      this.emit('warn', '挂挡前先踩住刹车，否则车会突然窜出去');
       return false;
     }
+    if (target === 2 && Math.abs(this.speed) > 0.5) {
+      this.emit('warn', '车还在动，不能挂 P 挡');
+      return false;
+    }
+    if (target !== 0 && Math.abs(this.speed) > 0.8) {
+      this.emit('warn', '车辆未停稳，先踩刹车再换挡');
+      return false;
+    }
+
     this.gear = target;
-    this.emit('ok', target === 1 ? '已挂 D 挡' : target === -1 ? '已挂 R 挡' : '已挂 N 挡');
+    if (target === 1) {
+      this.autoGear = 1;
+      this.autoRatioSmooth = AUTO_RATIOS[0];
+    }
+    this.emit(
+      'ok',
+      target === 2 ? '已挂 P 挡（驻车）' : target === 1 ? '已挂 D 挡' : target === -1 ? '已挂 R 挡' : '已挂 N 挡'
+    );
     return true;
   }
 
@@ -230,6 +295,7 @@ export class Car {
       }
     } else {
       this.clutch = 0;
+      this.updateAutoGear(dt);
     }
 
     // ---------- 转向 ----------
@@ -300,6 +366,8 @@ export class Car {
 
     // 手刹能压住低速运动：不松手刹车就走不了
     if (this.handbrake && Math.abs(next) < 1.6) next = 0;
+    // P 挡（驻车挡）直接锁死
+    if (this.gearbox === 'auto' && this.gear === 2) next = 0;
 
     // 怠速/静止吸附
     if (Math.abs(next) < 0.05 && Math.abs(accel) < 0.4) next = 0;
