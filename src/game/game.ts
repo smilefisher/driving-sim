@@ -107,86 +107,104 @@ export class Game {
   // ------------------------------------------------------------ 后视镜
 
   private setupMirrors() {
-    const mk = (
-      w: number,
-      h: number,
-      plane: THREE.PlaneGeometry,
-      anchorPos: THREE.Vector3,
-      planeRotY: number,
-      camPos: THREE.Vector3,
-      camRotY: number,
-      fov: number
-    ) => {
-      const rt = new THREE.WebGLRenderTarget(w, h, {
+    interface MirrorSpec {
+      w: number;
+      h: number;
+      pw: number;
+      ph: number;
+      parent: THREE.Object3D;
+      pos: THREE.Vector3;
+      rotY: number;
+      /** 镜框相对镜面向后偏移一点，露出一圈边框 */
+      frameOffset: THREE.Vector3;
+      camPos: THREE.Vector3;
+      camRotY: number;
+      fov: number;
+    }
+
+    const mk = (spec: MirrorSpec) => {
+      const rt = new THREE.WebGLRenderTarget(spec.w, spec.h, {
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
       });
       const tex = rt.texture;
       tex.wrapS = THREE.RepeatWrapping;
+      // 水平翻转：镜内摄像机看的是"背后"，翻转后才像真正的镜子
       tex.repeat.x = -1;
       tex.offset.x = 1;
 
-      const mat = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
-      const mesh = new THREE.Mesh(plane, mat);
-      mesh.position.copy(anchorPos);
-      mesh.rotation.y = planeRotY;
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(spec.pw, spec.ph),
+        new THREE.MeshBasicMaterial({ map: tex, toneMapped: false })
+      );
+      mesh.position.copy(spec.pos);
+      mesh.rotation.y = spec.rotY;
       mesh.layers.set(LAYER_INTERIOR);
-      this.model.interior.add(mesh);
+      spec.parent.add(mesh);
 
-      // 镜框
       const frame = new THREE.Mesh(
-        new THREE.PlaneGeometry(plane.parameters.width + 0.022, plane.parameters.height + 0.022),
+        new THREE.PlaneGeometry(spec.pw + 0.02, spec.ph + 0.02),
         new THREE.MeshBasicMaterial({ color: '#15171a' })
       );
-      frame.position.copy(anchorPos).add(new THREE.Vector3(0, 0, 0.004));
-      frame.rotation.y = planeRotY;
+      frame.position.copy(spec.pos).add(spec.frameOffset);
+      frame.rotation.y = spec.rotY;
       frame.layers.set(LAYER_INTERIOR);
-      this.model.interior.add(frame);
+      spec.parent.add(frame);
 
-      const cam = new THREE.PerspectiveCamera(fov, w / h, 0.1, 400);
-      cam.position.copy(camPos);
-      cam.rotation.y = camRotY;
+      const cam = new THREE.PerspectiveCamera(spec.fov, spec.w / spec.h, 0.1, 400);
+      cam.position.copy(spec.camPos);
+      cam.rotation.y = spec.camRotY;
       cam.layers.set(0);
-
       this.model.root.add(cam);
+
       this.mirrors.push({ rt, cam, mesh });
     };
 
-    // 车内后视镜
-    mk(
-      320,
-      120,
-      new THREE.PlaneGeometry(0.26, 0.095),
-      new THREE.Vector3(0, 1.315, 0.63),
-      Math.PI,
-      new THREE.Vector3(0, 1.32, 0.6),
-      0,
-      30
-    );
+    // 车内后视镜：真实挂在风挡上方，位置合理，直接放在世界里
+    mk({
+      w: 320,
+      h: 120,
+      pw: 0.26,
+      ph: 0.095,
+      parent: this.model.interior,
+      pos: new THREE.Vector3(0, 1.29, 0.6),
+      rotY: Math.PI,
+      frameOffset: new THREE.Vector3(0, 0, 0.004),
+      camPos: new THREE.Vector3(0, 1.3, 0.57),
+      camRotY: 0,
+      fov: 30,
+    });
 
-    // 左外后视镜（画面朝驾驶员一侧）
-    mk(
-      160,
-      110,
-      new THREE.PlaneGeometry(0.12, 0.085),
-      new THREE.Vector3(-0.72, 1.03, 0.42),
-      Math.PI - 0.55,
-      new THREE.Vector3(-0.95, 1.02, 0.5),
-      -0.62,
-      46
-    );
+    // 左右外后视镜：真实镜位在车身侧面 55° 侧后方，正常坐姿下根本看不到，
+    // 所以做成驾驶舱视角左右下角的镜面挂件（游戏通行做法），画面仍取自真实镜位。
+    // 车头朝 +z 时：车的左侧是 +x，右侧是 -x。
+    mk({
+      w: 160,
+      h: 110,
+      pw: 0.2,
+      ph: 0.135,
+      parent: this.camCockpit,
+      pos: new THREE.Vector3(-0.34, -0.2, -0.5),
+      rotY: 0,
+      frameOffset: new THREE.Vector3(0, 0, -0.004),
+      camPos: new THREE.Vector3(0.94, 1.0, 0.5),
+      camRotY: -0.58,
+      fov: 46,
+    });
 
-    // 右外后视镜
-    mk(
-      160,
-      110,
-      new THREE.PlaneGeometry(0.12, 0.085),
-      new THREE.Vector3(0.72, 1.03, 0.42),
-      Math.PI + 0.55,
-      new THREE.Vector3(0.95, 1.02, 0.5),
-      0.62,
-      46
-    );
+    mk({
+      w: 160,
+      h: 110,
+      pw: 0.2,
+      ph: 0.135,
+      parent: this.camCockpit,
+      pos: new THREE.Vector3(0.34, -0.2, -0.5),
+      rotY: 0,
+      frameOffset: new THREE.Vector3(0, 0, -0.004),
+      camPos: new THREE.Vector3(-0.94, 1.0, 0.5),
+      camRotY: 0.58,
+      fov: 46,
+    });
   }
 
   // ------------------------------------------------------------ 输入
@@ -558,8 +576,8 @@ export class Game {
     const carPos = this.model.root.position;
 
     if (this.cameraMode === 'top') {
-      this.camTop.position.set(carPos.x, 24, carPos.z - 13);
-      this.camTop.lookAt(carPos.x, 0, carPos.z + 8);
+      this.camTop.position.set(carPos.x, 12, carPos.z - 8);
+      this.camTop.lookAt(carPos.x, 0, carPos.z + 4);
     } else if (this.cameraMode === 'orbit') {
       this.orbitAngle += dt * 0.35;
       const r = 8.5;

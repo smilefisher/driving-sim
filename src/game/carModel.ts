@@ -24,9 +24,9 @@ const M = {
   }),
   tail: new THREE.MeshStandardMaterial({ color: '#8c2b25', emissive: '#5c1512', emissiveIntensity: 0.5 }),
   plate: new THREE.MeshStandardMaterial({ color: '#f2f4f5', roughness: 0.6 }),
-  interiorDark: new THREE.MeshStandardMaterial({ color: '#262a30', roughness: 0.85 }),
-  interiorMid: new THREE.MeshStandardMaterial({ color: '#343a42', roughness: 0.8 }),
-  seat: new THREE.MeshStandardMaterial({ color: '#2b3037', roughness: 0.95 }),
+  interiorDark: new THREE.MeshStandardMaterial({ color: '#3b424b', roughness: 0.85 }),
+  interiorMid: new THREE.MeshStandardMaterial({ color: '#4c545e', roughness: 0.8 }),
+  seat: new THREE.MeshStandardMaterial({ color: '#3a4048', roughness: 0.95 }),
   chrome: new THREE.MeshStandardMaterial({ color: '#9aa3ad', roughness: 0.35, metalness: 0.6 }),
   knob: new THREE.MeshStandardMaterial({ color: '#1f2226', roughness: 0.5 }),
   gaugeFace: new THREE.MeshStandardMaterial({ color: '#0d0f12', roughness: 0.4 }),
@@ -154,22 +154,27 @@ export function createCarModel(): CarModel {
   exterior.add(shadow);
 
   // ================= 驾驶舱内饰 =================
-  // 仪表台
-  interior.add(box(1.66, 0.3, 0.52, M.interiorDark, 0, 0.9, 0.78));
-  interior.add(box(1.62, 0.06, 0.5, M.interiorMid, 0, 1.06, 0.76));
+  // 座舱补光：没有它内饰全在阴影里；但太强会把顶棚照爆，只给一点暖光
+  const cabinLight = new THREE.PointLight('#fff2dc', 1.9, 3.2, 2);
+  cabinLight.position.set(0.1, 1.16, -0.1);
+  interior.add(cabinLight);
+
+  // 仪表台（压低到 0.95m，让驾驶员能看见更多路面）
+  interior.add(box(1.66, 0.26, 0.55, M.interiorDark, 0, 0.82, 0.8));
+  interior.add(box(1.62, 0.05, 0.5, M.interiorMid, 0, 0.955, 0.78));
 
   // 仪表盘（转速表区域）
-  const cluster = box(0.5, 0.17, 0.05, M.gaugeFace, 0.37, 1.0, 0.62);
-  cluster.rotation.x = -0.3;
+  const cluster = box(0.5, 0.16, 0.05, M.gaugeFace, 0.37, 0.92, 0.66);
+  cluster.rotation.x = -0.32;
   interior.add(cluster);
 
   // 中央扶手 / 挡杆座
-  interior.add(box(0.34, 0.36, 1.0, M.interiorDark, -0.08, 0.62, 0.22));
-  interior.add(box(0.3, 0.05, 0.4, M.interiorMid, -0.08, 0.81, 0.34));
+  interior.add(box(0.34, 0.32, 1.0, M.interiorDark, -0.08, 0.58, 0.22));
+  interior.add(box(0.3, 0.05, 0.4, M.interiorMid, -0.08, 0.75, 0.34));
 
   // 方向盘
   const wheelTilt = new THREE.Group();
-  wheelTilt.position.set(0.37, 1.0, 0.56);
+  wheelTilt.position.set(0.37, 0.94, 0.6);
   wheelTilt.rotation.x = 0.42;
   const steeringSpin = new THREE.Group();
   wheelTilt.add(steeringSpin);
@@ -184,7 +189,7 @@ export function createCarModel(): CarModel {
   interior.add(wheelTilt);
 
   // 转向柱
-  const column = box(0.09, 0.09, 0.3, M.interiorMid, 0.37, 0.94, 0.64);
+  const column = box(0.09, 0.09, 0.3, M.interiorMid, 0.37, 0.88, 0.68);
   column.rotation.x = 0.42;
   interior.add(column);
 
@@ -227,16 +232,17 @@ export function createCarModel(): CarModel {
 
   // 门板 / A 柱 / 车顶内衬
   for (const sx of [-1, 1]) {
-    interior.add(box(0.08, 0.55, 1.85, M.interiorDark, sx * 0.84, 0.85, -0.2));
-    const pillar = box(0.09, 0.62, 0.1, M.interiorMid, sx * 0.78, 1.12, 0.55);
-    pillar.rotation.z = sx * 0.12;
-    pillar.rotation.x = -0.3;
+    interior.add(box(0.08, 0.55, 1.85, M.interiorDark, sx * 0.84, 0.82, -0.2));
+    const pillar = box(0.085, 0.6, 0.1, M.interiorMid, sx * 0.77, 1.14, 0.46);
+    pillar.rotation.z = sx * 0.1;
+    pillar.rotation.x = -0.28;
     interior.add(pillar);
   }
-  const headliner = box(1.5, 0.04, 1.8, M.interiorMid, 0, 1.42, -0.25);
+  // 车顶内衬只到前风挡上沿，别把视线切掉
+  const headliner = box(1.5, 0.04, 1.5, M.interiorMid, 0, 1.42, -0.42);
   interior.add(headliner);
   // 风挡上沿
-  interior.add(box(1.56, 0.1, 0.12, M.interiorMid, 0, 1.33, 0.62));
+  interior.add(box(1.56, 0.09, 0.12, M.interiorMid, 0, 1.37, 0.5));
 
   // 镜面锚点（镜面本体在 game 里创建，因为要挂渲染目标纹理）
   const mkAnchor = (x: number, y: number, z: number) => {
@@ -246,17 +252,17 @@ export function createCarModel(): CarModel {
     return o;
   };
   const mirrorAnchors = {
-    rear: mkAnchor(0, 1.3, 0.62),
-    left: mkAnchor(-0.78, 1.03, 0.5),
-    right: mkAnchor(0.78, 1.03, 0.5),
+    rear: mkAnchor(0, 1.29, 0.58),
+    left: mkAnchor(-0.7, 1.0, 0.38),
+    right: mkAnchor(0.7, 1.0, 0.38),
   };
 
   // 转向灯指示（车内，左右各自独立材质，否则会一起亮）
   const lampMatL = M.gaugeFace.clone();
   const lampMatR = M.gaugeFace.clone();
   const indicatorLamps = {
-    left: box(0.06, 0.04, 0.02, lampMatL, 0.3, 1.02, 0.6) as THREE.Mesh,
-    right: box(0.06, 0.04, 0.02, lampMatR, 0.44, 1.02, 0.6) as THREE.Mesh,
+    left: box(0.06, 0.04, 0.02, lampMatL, 0.3, 0.96, 0.63) as THREE.Mesh,
+    right: box(0.06, 0.04, 0.02, lampMatR, 0.44, 0.96, 0.63) as THREE.Mesh,
   };
   interior.add(indicatorLamps.left, indicatorLamps.right);
 
