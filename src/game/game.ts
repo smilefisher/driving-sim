@@ -581,6 +581,9 @@ export class Game {
   private render3d(dt: number) {
     const cam = this.activeCamera();
 
+    // 相机挂在车模型下面，先强制刷新世界矩阵，避免用上一帧的位姿
+    this.model.root.updateMatrixWorld(true);
+
     // 后视镜渲染（只在驾驶舱视角下）
     if (this.cameraMode === 'cockpit') {
       for (const m of this.mirrors) {
@@ -594,6 +597,7 @@ export class Game {
       this.camCockpit.rotation.z = -this.steer * 0.02;
     }
 
+    cam.updateMatrixWorld(true);
     this.renderer.render(this.scene, cam);
   }
 
